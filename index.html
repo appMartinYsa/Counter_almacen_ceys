@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detección de Objetos en Tiempo Real</title>
+    <title>Detección de Objetos Optimizada</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
@@ -19,33 +19,44 @@
         }
         h1 {
             color: #333;
-            margin-bottom: 20px;
+            margin-bottom: 10px;
+            font-size: 1.5em;
         }
         #video-container {
             position: relative;
-            margin-bottom: 20px;
+            width: 100%;
+            max-width: 640px;
+            margin-bottom: 10px;
         }
-        #webcam {
-            max-width: 100%;
-            height: auto;
-        }
-        canvas {
+        #webcam, #canvas {
             position: absolute;
             top: 0;
             left: 0;
+            width: 100%;
+            height: auto;
         }
         #status {
-            margin-top: 20px;
+            margin-top: 10px;
             font-weight: bold;
             color: #4CAF50;
+        }
+        #fps {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 5px;
+            border-radius: 5px;
         }
     </style>
 </head>
 <body>
-    <h1>Detección de Objetos en Tiempo Real</h1>
+    <h1>Detección de Objetos Optimizada</h1>
     <div id="video-container">
-        <video id="webcam" autoplay muted></video>
+        <video id="webcam" autoplay muted playsinline></video>
         <canvas id="canvas"></canvas>
+        <div id="fps">FPS: 0</div>
     </div>
     <div id="status">Cargando modelo...</div>
 
@@ -54,10 +65,23 @@
         const canvas = document.getElementById('canvas');
         const ctx = canvas.getContext('2d');
         const status = document.getElementById('status');
+        const fpsDisplay = document.getElementById('fps');
 
-        // Configurar la cámara
+        let model;
+        let lastFrameTime = 0;
+        let fps = 0;
+
+        const targetFPS = 15; // Ajusta esto según el rendimiento deseado
+        const interval = 1000 / targetFPS;
+
         async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({ 'video': true });
+            const stream = await navigator.mediaDevices.getUserMedia({
+                'video': {
+                    facingMode: 'environment',
+                    width: { ideal: 640 },
+                    height: { ideal: 480 }
+                }
+            });
             video.srcObject = stream;
             return new Promise((resolve) => {
                 video.onloadedmetadata = () => {
@@ -66,37 +90,48 @@
             });
         }
 
-        // Cargar el modelo COCO-SSD
         async function loadModel() {
-            const model = await cocoSsd.load();
+            model = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
             status.textContent = 'Modelo cargado';
-            return model;
         }
 
-        // Realizar detecciones
-        async function detectObjects(model) {
+        async function detectObjects() {
+            const now = performance.now();
+            if (now - lastFrameTime < interval) {
+                requestAnimationFrame(detectObjects);
+                return;
+            }
+
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const predictions = await model.detect(canvas);
+            const predictions = await model.detect(canvas, 20, 0.3);
             
-            // Dibujar las predicciones
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
             predictions.forEach(prediction => {
                 const [x, y, width, height] = prediction.bbox;
                 ctx.strokeStyle = '#00FFFF';
-                ctx.lineWidth = 4;
+                ctx.lineWidth = 2;
                 ctx.strokeRect(x, y, width, height);
                 
-                ctx.fillStyle = '#00FFFF';
-                ctx.font = '18px Arial';
-                ctx.fillText(`${prediction.class} (${Math.round(prediction.score * 100)}%)`, x, y > 10 ? y - 5 : 10);
+                ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
+                ctx.fillRect(x, y - 20, width, 20);
+                
+                ctx.fillStyle = '#000000';
+                ctx.font = '16px Arial';
+                ctx.fillText(`${prediction.class} ${Math.round(prediction.score * 100)}%`, x, y - 5);
             });
 
-            // Actualizar el estado
             status.textContent = `Objetos detectados: ${predictions.length}`;
 
-            requestAnimationFrame(() => detectObjects(model));
+            const frameTime = performance.now() - now;
+            fps = 1000 / frameTime;
+            fpsDisplay.textContent = `FPS: ${fps.toFixed(1)}`;
+
+            lastFrameTime = now;
+            requestAnimationFrame(detectObjects);
         }
 
-        // Función principal
         async function main() {
             await setupCamera();
             video.play();
@@ -104,11 +139,10 @@
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
 
-            const model = await loadModel();
-            detectObjects(model);
+            await loadModel();
+            detectObjects();
         }
 
-        // Iniciar la aplicación
         main();
     </script>
 </body>
