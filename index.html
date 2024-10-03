@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Detección de Objetos Optimizada</title>
+    <title>Detección de Bulones en Estanterías</title>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd"></script>
     <style>
@@ -49,16 +49,26 @@
             padding: 5px;
             border-radius: 5px;
         }
+        #toggleFlash {
+            margin-top: 10px;
+            padding: 10px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
     </style>
 </head>
 <body>
-    <h1>Detección de Objetos Optimizada</h1>
+    <h1>Detección de Bulones en Estanterías</h1>
     <div id="video-container">
         <video id="webcam" autoplay muted playsinline></video>
         <canvas id="canvas"></canvas>
         <div id="fps">FPS: 0</div>
     </div>
     <div id="status">Cargando modelo...</div>
+    <button id="toggleFlash">Activar/Desactivar Flash</button>
 
     <script>
         const video = document.getElementById('webcam');
@@ -66,22 +76,25 @@
         const ctx = canvas.getContext('2d');
         const status = document.getElementById('status');
         const fpsDisplay = document.getElementById('fps');
+        const toggleFlashButton = document.getElementById('toggleFlash');
 
         let model;
         let lastFrameTime = 0;
         let fps = 0;
+        let isFlashOn = false;
 
-        const targetFPS = 15; // Ajusta esto según el rendimiento deseado
+        const targetFPS = 15;
         const interval = 1000 / targetFPS;
 
         async function setupCamera() {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                'video': {
+            const constraints = {
+                video: {
                     facingMode: 'environment',
-                    width: { ideal: 640 },
-                    height: { ideal: 480 }
+                    width: { ideal: 1280 },
+                    height: { ideal: 720 }
                 }
-            });
+            };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
             video.srcObject = stream;
             return new Promise((resolve) => {
                 video.onloadedmetadata = () => {
@@ -95,6 +108,11 @@
             status.textContent = 'Modelo cargado';
         }
 
+        function isBolt(prediction) {
+            const boltKeywords = ['screw', 'bolt', 'nail', 'fastener'];
+            return boltKeywords.some(keyword => prediction.class.toLowerCase().includes(keyword));
+        }
+
         async function detectObjects() {
             const now = performance.now();
             if (now - lastFrameTime < interval) {
@@ -103,26 +121,30 @@
             }
 
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-            const predictions = await model.detect(canvas, 20, 0.3);
+            const predictions = await model.detect(canvas);
             
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
+            let boltCount = 0;
             predictions.forEach(prediction => {
-                const [x, y, width, height] = prediction.bbox;
-                ctx.strokeStyle = '#00FFFF';
-                ctx.lineWidth = 2;
-                ctx.strokeRect(x, y, width, height);
-                
-                ctx.fillStyle = 'rgba(0, 255, 255, 0.5)';
-                ctx.fillRect(x, y - 20, width, 20);
-                
-                ctx.fillStyle = '#000000';
-                ctx.font = '16px Arial';
-                ctx.fillText(`${prediction.class} ${Math.round(prediction.score * 100)}%`, x, y - 5);
+                if (isBolt(prediction)) {
+                    boltCount++;
+                    const [x, y, width, height] = prediction.bbox;
+                    ctx.strokeStyle = '#FF0000';
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(x, y, width, height);
+                    
+                    ctx.fillStyle = 'rgba(255, 0, 0, 0.5)';
+                    ctx.fillRect(x, y - 20, width, 20);
+                    
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.font = '16px Arial';
+                    ctx.fillText(`Bulón ${Math.round(prediction.score * 100)}%`, x, y - 5);
+                }
             });
 
-            status.textContent = `Objetos detectados: ${predictions.length}`;
+            status.textContent = `Bulones detectados: ${boltCount}`;
 
             const frameTime = performance.now() - now;
             fps = 1000 / frameTime;
@@ -130,6 +152,24 @@
 
             lastFrameTime = now;
             requestAnimationFrame(detectObjects);
+        }
+
+        async function toggleFlash() {
+            const track = video.srcObject.getVideoTracks()[0];
+            const capabilities = track.getCapabilities();
+            if (capabilities.torch) {
+                isFlashOn = !isFlashOn;
+                try {
+                    await track.applyConstraints({
+                        advanced: [{ torch: isFlashOn }]
+                    });
+                    toggleFlashButton.textContent = isFlashOn ? 'Desactivar Flash' : 'Activar Flash';
+                } catch (err) {
+                    console.error('Error al cambiar el flash:', err);
+                }
+            } else {
+                alert('Tu dispositivo no soporta el control del flash');
+            }
         }
 
         async function main() {
@@ -141,6 +181,8 @@
 
             await loadModel();
             detectObjects();
+
+            toggleFlashButton.addEventListener('click', toggleFlash);
         }
 
         main();
